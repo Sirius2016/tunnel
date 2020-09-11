@@ -228,7 +228,7 @@ func (q *Quic) Dial(addr string) (MultiplexingClientConn, error) {
 	}
 	conn, err := newQuicClientConn(sess)
 	if err != nil {
-		sess.Close()
+		sess.CloseWithError(0, "")
 		return nil, err
 	}
 	return conn, nil
@@ -309,6 +309,10 @@ type quicConn struct {
 	streamCount int32
 }
 
+func (c *quicConn) Close() error {
+	return c.CloseWithError(0, "")
+}
+
 type quicStream struct {
 	c *quicConn
 	quic.Stream
@@ -382,7 +386,7 @@ func (s quicListener) Accept() (MultiplexingServerConn, error) {
 	}
 	sconn, err := newQuicServerConn(conn)
 	if err != nil {
-		conn.Close()
+		conn.CloseWithError(0, "")
 		return nil, err
 	}
 	return sconn, nil

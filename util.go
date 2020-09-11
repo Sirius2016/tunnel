@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cosiner/golog"
-	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/snappy"
 	"github.com/klauspost/compress/zlib"
 	"github.com/lucas-clemente/quic-go"
@@ -63,8 +62,8 @@ func smuxConfig() *smux.Config {
 func quicConfig() *quic.Config {
 	return &quic.Config{
 		//HandshakeTimeout: time.Second * 3,
-		IdleTimeout: time.Minute * 3,
-		KeepAlive:   true,
+		MaxIdleTimeout: time.Minute * 3,
+		KeepAlive:      true,
 	}
 }
 
@@ -294,8 +293,6 @@ func newCompressConn(conn net.Conn, algorithm string) (net.Conn, error) {
 	switch algorithm {
 	case "disable":
 		return conn, nil
-	default:
-		fallthrough
 	case "zlib":
 		return &proxyConn{
 			Conn: conn,
@@ -308,12 +305,14 @@ func newCompressConn(conn net.Conn, algorithm string) (net.Conn, error) {
 			rf:   func(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) },
 			wf:   func(w io.Writer) io.Writer { return gzip.NewWriter(w) },
 		}, nil
-	case "s2":
-		return &proxyConn{
-			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return s2.NewReader(r), nil },
-			wf:   func(w io.Writer) io.Writer { return s2.NewWriter(w) },
-		}, nil
+		//case "s2":
+		//	return &proxyConn{
+		//		Conn: conn,
+		//		rf:   func(r io.Reader) (io.Reader, error) { return s2.NewReader(r), nil },
+		//		wf:   func(w io.Writer) io.Writer { return s2.NewWriter(w) },
+		//	}, nil
+	default:
+		fallthrough
 	case "snappy":
 		return &proxyConn{
 			Conn: conn,

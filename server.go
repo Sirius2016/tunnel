@@ -160,7 +160,7 @@ func (s *Server) handleStream(clientConn net.Conn) {
 
 		err = ProtocolWrite(clientConn, HandshakeResponse{
 			Status: HandshakeStatusFailed,
-			Msg:    "dial destination failed",
+			Msg:    fmt.Sprintf("dial destination failed: %s", err.Error()),
 		})
 		if err != nil {
 			golog.WithFields("error", err.Error()).Error("write handshake response failed")
