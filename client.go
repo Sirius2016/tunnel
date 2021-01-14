@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cosiner/golog"
+	"github.com/ginuerzh/gosocks4"
 	"github.com/ginuerzh/gosocks5"
 	"github.com/oschwald/geoip2-golang"
 	"github.com/soheilhy/cmux"
@@ -175,12 +176,17 @@ var httpMethods = []string{
 
 func (t groupListener) run() {
 	l := cmux.New(t.l)
-	for typ, l := range map[string]net.Listener{
-		"http":   l.Match(protocolHttpMatcher),
-		"socks5": l.Match(cmux.Any()),
+	type matcher struct {
+		typ     string
+		matcher cmux.Matcher
+	}
+	for _, m := range []matcher{
+		{"http", protocolHttpMatcher},
+		{"socks4", protocolSocksMatcher(4)},
+		{"socks5", protocolSocksMatcher(5)},
 	} {
-		typ := typ
-		l := l
+		typ := m.typ
+		l := l.Match(m.matcher)
 		go func() {
 			for {
 				conn, err := l.Accept()
@@ -488,6 +494,76 @@ func (c *Client) connectToRemote(addr *gosocks5.Addr) (net.Conn, bool) {
 	return proxyConn, true
 }
 
+type buffedConn struct {
+	net.Conn
+	br *bufio.Reader
+}
+
+func (r buffedConn) Read(b []byte) (int, error) {
+	return r.br.Read(b)
+}
+
+func (c *Client) handleSocks4(clientConn net.Conn) {
+	var proxyStarted bool
+	defer func() {
+		if !proxyStarted {
+			clientConn.Close()
+		}
+	}()
+
+	req, err := gosocks4.ReadRequest(clientConn)
+	if err != nil {
+		golog.WithFields("addr", clientConn.RemoteAddr().String(), "error", err.Error()).Error("read client request failed")
+		return
+	}
+	writeReply := func(res uint8) bool {
+		err := gosocks4.NewReply(res, nil).Write(clientConn)
+		if err != nil {
+			golog.WithFields("error", err.Error()).Error("write reply failed")
+			return false
+		}
+		return true
+	}
+	switch req.Cmd {
+	case gosocks4.CmdConnect:
+	default:
+		golog.WithFields("addr", clientConn.RemoteAddr().String(), "cmd", req.Cmd).Error("unsupported cmd from client")
+		writeReply(gosocks4.Rejected)
+		return
+	}
+	var addr gosocks5.Addr
+	switch req.Addr.Type {
+	case gosocks4.AddrIPv4:
+		addr.Type = gosocks5.AddrIPv4
+	case gosocks4.AddrDomain:
+		addr.Type = gosocks5.AddrDomain
+	default:
+		golog.WithFields("addr", clientConn.RemoteAddr().String(), "addrType", req.Addr.Type).Error("unsupported addr type from client")
+		writeReply(gosocks4.Rejected)
+		return
+	}
+	addr.Host = req.Addr.Host
+	addr.Port = req.Addr.Port
+	proxyConn, ok := c.connectToRemote(&addr)
+	if !ok {
+		return
+	}
+	var replyWrited bool
+	defer func() {
+		if !replyWrited {
+			writeReply(gosocks4.Failed)
+		}
+	}()
+	replyWrited = true
+	if !writeReply(gosocks4.Granted) {
+		proxyConn.Close()
+		return
+	}
+
+	proxyStarted = true
+	pipeConns(clientConn, proxyConn)
+}
+
 func (c *Client) handleSocks5(clientConn net.Conn) {
 	var proxyStarted bool
 	defer func() {
@@ -495,6 +571,7 @@ func (c *Client) handleSocks5(clientConn net.Conn) {
 			clientConn.Close()
 		}
 	}()
+
 	{
 		sconn := gosocks5.ServerConn(clientConn, nil)
 		err := sconn.Handleshake()
@@ -512,7 +589,7 @@ func (c *Client) handleSocks5(clientConn net.Conn) {
 	}
 	writeReply := func(res uint8) bool {
 		reply := gosocks5.NewReply(res, nil)
-		err = reply.Write(clientConn)
+		err := reply.Write(clientConn)
 		if err != nil {
 			golog.WithFields("error", err.Error()).Error("write reply failed")
 			return false
@@ -621,6 +698,8 @@ func (c *Client) handleConn(clientConn net.Conn, typ string) {
 	switch typ {
 	case "socks5":
 		c.handleSocks5(clientConn)
+	case "socks4":
+		c.handleSocks4(clientConn)
 	case "http":
 		c.handleHttp(clientConn)
 	default:

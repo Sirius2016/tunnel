@@ -23,9 +23,11 @@ import (
 	"time"
 
 	"github.com/cosiner/golog"
-	"github.com/klauspost/compress/snappy"
-	"github.com/klauspost/compress/zlib"
+	"github.com/klauspost/compress/flate"
+	"github.com/klauspost/compress/s2"
+	"github.com/klauspost/compress/zstd"
 	"github.com/lucas-clemente/quic-go"
+	"github.com/soheilhy/cmux"
 	"github.com/xtaci/smux"
 )
 
@@ -293,31 +295,25 @@ func newCompressConn(conn net.Conn, algorithm string) (net.Conn, error) {
 	switch algorithm {
 	case "disable":
 		return conn, nil
-	case "zlib":
+	case "s2":
 		return &proxyConn{
 			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return zlib.NewReader(r) },
-			wf:   func(w io.Writer) io.Writer { return zlib.NewWriter(w) },
+			rf:   func(r io.Reader) (io.Reader, error) { return s2.NewReader(r), nil },
+			wf:   func(w io.Writer) io.Writer { return s2.NewWriter(w) },
 		}, nil
-	case "gzip":
+	case "flate":
 		return &proxyConn{
 			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) },
-			wf:   func(w io.Writer) io.Writer { return gzip.NewWriter(w) },
+			rf:   func(r io.Reader) (io.Reader, error) { return flate.NewReader(r), nil },
+			wf:   func(w io.Writer) io.Writer { w, _ = flate.NewWriter(w, flate.DefaultCompression); return w },
 		}, nil
-		//case "s2":
-		//	return &proxyConn{
-		//		Conn: conn,
-		//		rf:   func(r io.Reader) (io.Reader, error) { return s2.NewReader(r), nil },
-		//		wf:   func(w io.Writer) io.Writer { return s2.NewWriter(w) },
-		//	}, nil
 	default:
 		fallthrough
-	case "snappy":
+	case "zstd":
 		return &proxyConn{
 			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return snappy.NewReader(r), nil },
-			wf:   func(w io.Writer) io.Writer { return snappy.NewBufferedWriter(w) },
+			rf:   func(r io.Reader) (io.Reader, error) { return zstd.NewReader(r) },
+			wf:   func(w io.Writer) io.Writer { w, _ = zstd.NewWriter(w); return w },
 		}, nil
 	}
 }
@@ -648,6 +644,17 @@ func (c *connListener) Accept() (net.Conn, error) {
 		return conn, nil
 	}
 	return nil, fmt.Errorf("closed")
+}
+
+func protocolSocksMatcher(ver int) cmux.Matcher {
+	return func(reader io.Reader) bool {
+		br := bufio.NewReader(reader)
+		v, err := br.ReadByte()
+		if err != nil {
+			return false
+		}
+		return ver == int(v)
+	}
 }
 
 func protocolHttpMatcher(r io.Reader) bool {
