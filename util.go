@@ -98,6 +98,57 @@ func ignoreError(err error) bool {
 	}
 }
 
+const (
+	timeoutMaxTimes = 5
+	timeoutDur      = time.Second * 5
+)
+
+type timeoutChecker struct {
+	times int
+}
+
+func (c *timeoutChecker) check(n int, err error) (int, error) {
+	if err == nil {
+		c.times = 0
+		return n, nil
+	}
+	ne, ok := err.(net.Error)
+	if !ok {
+		return n, err
+	}
+	if ne.Temporary() {
+		return n, nil
+	}
+	if ne.Timeout() {
+		c.times++
+		if c.times >= timeoutMaxTimes {
+			return n, fmt.Errorf("conn timeout")
+		}
+		return n, nil
+	}
+	return n, err
+}
+
+type timeoutReader struct {
+	conn net.Conn
+	c    timeoutChecker
+}
+
+func (r *timeoutReader) Read(b []byte) (n int, err error) {
+	r.conn.SetReadDeadline(time.Now().Add(timeoutDur))
+	return r.c.check(r.conn.Read(b))
+}
+
+type timeoutWriter struct {
+	conn net.Conn
+	c    timeoutChecker
+}
+
+func (r *timeoutWriter) Write(b []byte) (n int, err error) {
+	r.conn.SetWriteDeadline(time.Now().Add(timeoutDur))
+	return r.c.check(r.conn.Write(b))
+}
+
 func pipeConns(clientConn, proxyConn net.Conn) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -107,7 +158,7 @@ func pipeConns(clientConn, proxyConn net.Conn) {
 
 	copyBuffer := func(dst, src net.Conn) {
 		buf := make([]byte, 128*1024)
-		_, err := io.CopyBuffer(dst, src, buf)
+		_, err := io.CopyBuffer(&timeoutWriter{conn: dst}, &timeoutReader{conn: src}, buf)
 		if err != nil && !ignoreError(err) {
 			golog.WithFields("error", err.Error()).Error("copy data failed")
 		}
