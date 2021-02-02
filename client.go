@@ -258,29 +258,33 @@ func (c *Client) getServerConn() (MultiplexingClientConn, error) {
 	c.serverConnMu.Lock()
 	defer c.serverConnMu.Unlock()
 
-	var curr []MultiplexingClientConn
+	var available []MultiplexingClientConn
 	for c := range c.serverConns {
-		if len(curr) == 0 || c.NumStreams() < curr[0].NumStreams() {
-			curr = []MultiplexingClientConn{c}
-		} else if c.NumStreams() == curr[0].NumStreams() {
-			curr = append(curr, c)
+		if len(available) == 0 || c.NumStreams() < available[0].NumStreams() {
+			available = []MultiplexingClientConn{c}
+		} else if c.NumStreams() == available[0].NumStreams() {
+			available = append(available, c)
 		}
 	}
 	const KEEP_SERVER_CONN = 4
 	if len(c.serverConns) < KEEP_SERVER_CONN {
 		conn, err := c.serverTransfer.Dial(c.config.Server.Listen)
 		if err != nil {
-			if len(curr) == 0 {
+			if len(available) == 0 {
 				return nil, fmt.Errorf("dial server failed: %w", err)
 			}
 			golog.WithFields("erorr", err.Error()).Error("create new server connection failed")
 		} else {
 			c.serverConns[conn] = 0
-			curr = []MultiplexingClientConn{conn}
+			if len(available) > 0 && available[0].NumStreams() > 0 {
+				available = []MultiplexingClientConn{conn}
+			} else {
+				available = append(available, conn)
+			}
 		}
 	}
-	if len(curr) > 0 {
-		return curr[rand.Intn(len(curr))], nil
+	if len(available) > 0 {
+		return available[rand.Intn(len(available))], nil
 	}
 	return nil, fmt.Errorf("no conn available")
 }
@@ -336,6 +340,7 @@ func (c *Client) openServerStream() (net.Conn, error) {
 			golog.WithFields("error", err.Error()).Error("open server stream failed")
 			continue
 		}
+
 		return &clientProxyConn{
 			Conn:  stream,
 			sconn: conn,
@@ -382,7 +387,6 @@ func (c *Client) createServerProxyStream(addr string) (net.Conn, error) {
 	default:
 		return nil, fmt.Errorf("server proxy addr failed: %s", handshakeResp.Msg)
 	}
-
 	return conn, nil
 }
 

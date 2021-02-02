@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -12,12 +11,10 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"sync/atomic"
 	"time"
 
 	"github.com/ghodss/yaml"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/xtaci/kcp-go"
+	"github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
 )
 
@@ -39,7 +36,6 @@ type TransferCreator func(key string, options map[string]string, w *MaskConnWrap
 
 var transfers = map[string]TransferCreator{
 	"kcp":  NewKcp,
-	"quic": NewQUIC,
 	"tcp":  NewTcp,
 }
 
@@ -136,11 +132,11 @@ func (k *Kcp) initConn(u *kcp.UDPSession) {
 		u.SetNoDelay(0, 40, 2, 1)
 	case "fast":
 		u.SetNoDelay(0, 30, 2, 1)
+	default:
+		fallthrough
 	case "fast2":
 		u.SetNoDelay(1, 20, 2, 1)
 	case "fast3":
-		fallthrough
-	default:
 		u.SetNoDelay(1, 10, 2, 1)
 	}
 }
@@ -189,62 +185,6 @@ func (k *Kcp) Listen(addr string) (MultiplexingListener, error) {
 	return smuxListener{
 		Listener: kcpListener{k: k, Listener: l},
 		config:   k.smuxConfig,
-	}, nil
-}
-
-type Quic struct {
-	w         *MaskConnWrapper
-	serverTLS *tls.Config
-	clientTLS *tls.Config
-
-	config *quic.Config
-}
-
-func NewQUIC(key string, options map[string]string, w *MaskConnWrapper) (Transfer, error) {
-	q := Quic{
-		w: w,
-	}
-	var err error
-	q.serverTLS, err = generateTLSFromKey(key, true)
-	if err != nil {
-		return nil, fmt.Errorf("generate tls config failed: %w", err)
-	}
-	q.clientTLS, err = generateTLSFromKey(key, false)
-	if err != nil {
-		return nil, fmt.Errorf("generate tls config failed: %w", err)
-	}
-	q.config = quicConfig()
-	return &q, nil
-}
-
-func (q *Quic) Dial(addr string) (MultiplexingClientConn, error) {
-	uc, uaddr, err := listenUDPAndWrap(addr, false, q.w)
-	if err != nil {
-		return nil, err
-	}
-	sess, err := quic.Dial(uc, uaddr, addr, q.clientTLS, q.config)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := newQuicClientConn(sess)
-	if err != nil {
-		sess.CloseWithError(0, "")
-		return nil, err
-	}
-	return conn, nil
-}
-
-func (q *Quic) Listen(addr string) (MultiplexingListener, error) {
-	uc, _, err := listenUDPAndWrap(addr, true, q.w)
-	if err != nil {
-		return nil, err
-	}
-	l, err := quic.Listen(uc, q.serverTLS, q.config)
-	if err != nil {
-		return nil, err
-	}
-	return quicListener{
-		Listener: l,
 	}, nil
 }
 
@@ -301,95 +241,6 @@ func (t *Tcp) Listen(addr string) (MultiplexingListener, error) {
 	}
 	l = tls.NewListener(w, t.serverTLS)
 	return smuxListener{config: t.smuxConfig, Listener: l}, nil
-}
-
-type quicConn struct {
-	quic.Session
-
-	streamCount int32
-}
-
-func (c *quicConn) Close() error {
-	return c.CloseWithError(0, "")
-}
-
-type quicStream struct {
-	c *quicConn
-	quic.Stream
-}
-
-func (q quicStream) LocalAddr() net.Addr {
-	return q.c.LocalAddr()
-}
-
-func (q quicStream) RemoteAddr() net.Addr {
-	return q.c.RemoteAddr()
-}
-
-func (q quicStream) Close() error {
-	atomic.AddInt32(&q.c.streamCount, -1)
-	err := q.Stream.Close()
-	return err
-}
-
-func newQuicStream(c *quicConn, s quic.Stream) quicStream {
-	return quicStream{
-		c:      c,
-		Stream: s,
-	}
-}
-
-func newQuicServerConn(sess quic.Session) (MultiplexingServerConn, error) {
-	return &quicConn{
-		Session: sess,
-	}, nil
-}
-
-func newQuicClientConn(sess quic.Session) (MultiplexingClientConn, error) {
-	return &quicConn{
-		Session: sess,
-	}, nil
-}
-
-func (c *quicConn) NumStreams() int {
-	return int(atomic.LoadInt32(&c.streamCount))
-}
-
-func (c *quicConn) OpenStream() (net.Conn, error) {
-	s, err := c.Session.OpenStream()
-	if err != nil {
-		if s == nil {
-			return nil, err
-		}
-	}
-	return newQuicStream(c, s), nil
-}
-
-func (c *quicConn) AcceptStream() (net.Conn, error) {
-	s, err := c.Session.AcceptStream(context.Background())
-	if err != nil {
-		if s == nil {
-			return nil, err
-		}
-	}
-	return newQuicStream(c, s), nil
-}
-
-type quicListener struct {
-	quic.Listener
-}
-
-func (s quicListener) Accept() (MultiplexingServerConn, error) {
-	conn, err := s.Listener.Accept(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	sconn, err := newQuicServerConn(conn)
-	if err != nil {
-		conn.CloseWithError(0, "")
-		return nil, err
-	}
-	return sconn, nil
 }
 
 type smuxConn struct {
@@ -497,7 +348,7 @@ func generateTLSFromKey(keyStr string, isServer bool) (*tls.Config, error) {
 	var (
 		selfKey     *rsa.PrivateKey
 		selfCertDER []byte
-		serverName  = "quic-tunnel"
+		serverName  = "tunnel"
 	)
 	{
 		selfKey, err = rsa.GenerateKey(rand.Reader, 2048)
@@ -512,7 +363,7 @@ func generateTLSFromKey(keyStr string, isServer bool) (*tls.Config, error) {
 		}
 		if isServer {
 			template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-			template.DNSNames = []string{"quic-tunnel"}
+			template.DNSNames = []string{"tunnel"}
 		} else {
 			template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 		}
@@ -534,7 +385,7 @@ func generateTLSFromKey(keyStr string, isServer bool) (*tls.Config, error) {
 
 	if isServer {
 		return &tls.Config{
-			NextProtos:   []string{"quic-tunnel"},
+			NextProtos:   []string{"tunnel"},
 			Certificates: []tls.Certificate{tlsCert},
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 			ClientCAs:    certPool,
@@ -542,7 +393,7 @@ func generateTLSFromKey(keyStr string, isServer bool) (*tls.Config, error) {
 	}
 	return &tls.Config{
 		ServerName:   serverName,
-		NextProtos:   []string{"quic-tunnel"},
+		NextProtos:   []string{"tunnel"},
 		Certificates: []tls.Certificate{tlsCert},
 		RootCAs:      certPool,
 	}, nil

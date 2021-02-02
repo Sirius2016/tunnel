@@ -26,7 +26,6 @@ import (
 	"github.com/klauspost/compress/flate"
 	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/zstd"
-	"github.com/lucas-clemente/quic-go"
 	"github.com/soheilhy/cmux"
 	"github.com/xtaci/smux"
 )
@@ -61,14 +60,6 @@ func smuxConfig() *smux.Config {
 	return config
 }
 
-func quicConfig() *quic.Config {
-	return &quic.Config{
-		//HandshakeTimeout: time.Second * 3,
-		MaxIdleTimeout: time.Minute * 3,
-		KeepAlive:      true,
-	}
-}
-
 type buffReadConn struct {
 	net.Conn
 	br *bufio.Reader
@@ -98,56 +89,57 @@ func ignoreError(err error) bool {
 	}
 }
 
-const (
-	timeoutMaxTimes = 5
-	timeoutDur      = time.Second * 5
-)
-
-type timeoutChecker struct {
-	times int
-}
-
-func (c *timeoutChecker) check(n int, err error) (int, error) {
-	if err == nil {
-		c.times = 0
-		return n, nil
-	}
-	ne, ok := err.(net.Error)
-	if !ok {
-		return n, err
-	}
-	if ne.Temporary() {
-		return n, nil
-	}
-	if ne.Timeout() {
-		c.times++
-		if c.times >= timeoutMaxTimes {
-			return n, fmt.Errorf("conn timeout")
-		}
-		return n, nil
-	}
-	return n, err
-}
-
-type timeoutReader struct {
-	conn net.Conn
-	c    timeoutChecker
-}
-
-func (r *timeoutReader) Read(b []byte) (n int, err error) {
-	r.conn.SetReadDeadline(time.Now().Add(timeoutDur))
-	return r.c.check(r.conn.Read(b))
-}
-
-type timeoutWriter struct {
-	conn net.Conn
-	c    timeoutChecker
-}
-
-func (r *timeoutWriter) Write(b []byte) (n int, err error) {
-	r.conn.SetWriteDeadline(time.Now().Add(timeoutDur))
-	return r.c.check(r.conn.Write(b))
-}
+//
+//const (
+//	timeoutMaxTimes = 3
+//	timeoutDur      = time.Second * 2
+//)
+//
+//type timeoutChecker struct {
+//	times int
+//}
+//
+//func (c *timeoutChecker) check(n int, err error) (int, error) {
+//	if err == nil {
+//		c.times = 0
+//		return n, nil
+//	}
+//	ne, ok := err.(net.Error)
+//	if !ok {
+//		return n, err
+//	}
+//	if ne.Temporary() {
+//		return n, nil
+//	}
+//	if ne.Timeout() {
+//		c.times++
+//		if c.times >= timeoutMaxTimes {
+//			return n, fmt.Errorf("conn timeout")
+//		}
+//		return n, nil
+//	}
+//	return n, err
+//}
+//
+//type timeoutReader struct {
+//	conn net.Conn
+//	c    timeoutChecker
+//}
+//
+//func (r *timeoutReader) Read(b []byte) (n int, err error) {
+//	r.conn.SetReadDeadline(time.Now().Add(timeoutDur))
+//	return r.c.check(r.conn.Read(b))
+//}
+//
+//type timeoutWriter struct {
+//	conn net.Conn
+//	c    timeoutChecker
+//}
+//
+//func (r *timeoutWriter) Write(b []byte) (n int, err error) {
+//	r.conn.SetWriteDeadline(time.Now().Add(timeoutDur))
+//	return r.c.check(r.conn.Write(b))
+//}
 
 func pipeConns(clientConn, proxyConn net.Conn) {
 	var wg sync.WaitGroup
@@ -158,7 +150,7 @@ func pipeConns(clientConn, proxyConn net.Conn) {
 
 	copyBuffer := func(dst, src net.Conn) {
 		buf := make([]byte, 128*1024)
-		_, err := io.CopyBuffer(&timeoutWriter{conn: dst}, &timeoutReader{conn: src}, buf)
+		_, err := io.CopyBuffer(dst, src, buf)
 		if err != nil && !ignoreError(err) {
 			golog.WithFields("error", err.Error()).Error("copy data failed")
 		}

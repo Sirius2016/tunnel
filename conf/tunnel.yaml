@@ -1,14 +1,14 @@
 server:
-  compress: s2 # disable, zlib, gzip, s2, snappy
-  transfer: kcp # kcp, quic, tcp
+  compress: zstd # disable, zstd, flate, s2
+  transfer: kcp # kcp, tcp
   listen: :1099
   key: 'test key'
 
 client:
   listen: :1099
   server:
-    compress: s2 # disable, zlib, gzip, s2, snappy
-    transfer: kcp # kcp, quic, tcp
+    compress: zstd # disable, zstd, flate, s2
+    transfer: kcp # kcp, tcp
     listen: localhost:1099
     key: 'test key'
   rules: # if no rules matched, proxy by default

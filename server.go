@@ -13,8 +13,10 @@ import (
 )
 
 type Server struct {
-	config ServerConfig
-	l      MultiplexingListener
+	config      ServerConfig
+	l           MultiplexingListener
+	connCount   int32
+	streamCount int32
 
 	closed uint32
 	connWg sync.WaitGroup
@@ -99,12 +101,18 @@ func (s *Server) Run() {
 
 func (s *Server) handleConn(conn MultiplexingServerConn) {
 	defer conn.Close()
-	golog.WithFields("addr", conn.RemoteAddr()).Info("new connection")
+	connCount := atomic.AddInt32(&s.connCount, 1)
+	golog.WithFields("addr", conn.RemoteAddr()).Info("new connection", "connCount", connCount)
+	defer func() {
+		connCount := atomic.AddInt32(&s.connCount, -1)
+		golog.WithFields("addr", conn.RemoteAddr()).Info("close connection", "connCount", connCount)
+	}()
 
 	var wg sync.WaitGroup
 	for {
 		stream, err := conn.AcceptStream()
 		if err != nil {
+			golog.WithField("error", err).Error("accept stream failed")
 			if ne := net.Error(nil); errors.As(err, &ne) {
 				if ne.Temporary() {
 					continue
@@ -116,7 +124,6 @@ func (s *Server) handleConn(conn MultiplexingServerConn) {
 			}
 			break
 		}
-
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -128,6 +135,12 @@ func (s *Server) handleConn(conn MultiplexingServerConn) {
 }
 
 func (s *Server) handleStream(clientConn net.Conn) {
+	streamCount := atomic.AddInt32(&s.streamCount, 1)
+	golog.WithFields("addr", clientConn.RemoteAddr()).Info("new stream", "streamCount", streamCount)
+	defer func() {
+		streamCount := atomic.AddInt32(&s.streamCount, -1)
+		golog.WithFields("addr", clientConn.RemoteAddr()).Info("close stream", "streamCount", streamCount)
+	}()
 	var proxyStarted bool
 	defer func() {
 		if !proxyStarted {
