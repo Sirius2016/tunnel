@@ -1,4 +1,4 @@
-module github.com/cosiner/tunnel
+module github.com/zhuah/tunnel
 
 go 1.13
 
