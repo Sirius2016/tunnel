@@ -1,5 +1,5 @@
 server:
-  compress: zstd # disable, zstd, flate, s2
+  compress: snappy # disable, snappy, zlib
   transfer: kcp # kcp, tcp
   listen: :1099
   key: 'test key'

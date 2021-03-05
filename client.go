@@ -227,7 +227,7 @@ func (c *Client) Run() {
 			}
 
 			if !ignoreError(err) {
-				golog.WithFields("error", err.Error()).Fatal("listener accept conn failed")
+				golog.WithFields("error", err.Error()).Error("listener accept conn failed")
 			}
 			return
 		}

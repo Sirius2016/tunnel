@@ -10,7 +10,7 @@ require (
 	github.com/ginuerzh/gosocks4 v0.0.1
 	github.com/ginuerzh/gosocks5 v0.2.0
 	github.com/golang/protobuf v1.4.3 // indirect
-	github.com/klauspost/compress v1.11.8
+	github.com/golang/snappy v0.0.3
 	github.com/klauspost/cpuid/v2 v2.0.4 // indirect
 	github.com/klauspost/reedsolomon v1.9.11 // indirect
 	github.com/oschwald/geoip2-golang v1.5.0

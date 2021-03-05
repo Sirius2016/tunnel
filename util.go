@@ -5,12 +5,17 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"compress/zlib"
 	"crypto/md5"
 	"crypto/rsa"
 	"crypto/sha512"
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"github.com/cosiner/golog"
+	"github.com/golang/snappy"
+	"github.com/soheilhy/cmux"
+	"github.com/xtaci/smux"
 	"io"
 	"math/rand"
 	"net"
@@ -21,13 +26,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/cosiner/golog"
-	"github.com/klauspost/compress/flate"
-	"github.com/klauspost/compress/s2"
-	"github.com/klauspost/compress/zstd"
-	"github.com/soheilhy/cmux"
-	"github.com/xtaci/smux"
 )
 
 type closeOnceConn struct {
@@ -261,17 +259,17 @@ OUTER:
 
 type proxyConn struct {
 	net.Conn
-	rf func(io.Reader) (io.Reader, error)
-	wf func(io.Writer) io.Writer
+	rf func(io.Reader) (io.ReadCloser, error)
+	wf func(io.Writer) (io.WriteCloser, error)
 	mu sync.RWMutex
 
-	r io.Reader
-	w io.Writer
+	r io.ReadCloser
+	w io.WriteCloser
 }
 
-func (c *proxyConn) createReader() (io.Reader, error) {
+func (c *proxyConn) createReader() (io.ReadCloser, error) {
 	var (
-		r   io.Reader
+		r   io.ReadCloser
 		err error
 	)
 	c.mu.Lock()
@@ -282,17 +280,18 @@ func (c *proxyConn) createReader() (io.Reader, error) {
 	r = c.r
 	return r, err
 }
-func (c *proxyConn) createWriter() io.Writer {
+func (c *proxyConn) createWriter() (io.WriteCloser, error) {
 	var (
-		w io.Writer
+		w   io.WriteCloser
+		err error
 	)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.w == nil {
-		c.w = c.wf(c.Conn)
+		c.w, err = c.wf(c.Conn)
 	}
 	w = c.w
-	return w
+	return w, err
 }
 
 func (c *proxyConn) Read(b []byte) (int, error) {
@@ -315,7 +314,11 @@ func (c *proxyConn) Write(b []byte) (int, error) {
 	w := c.w
 	c.mu.RUnlock()
 	if w == nil {
-		w = c.createWriter()
+		var err error
+		w, err = c.createWriter()
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	n, err := w.Write(b)
@@ -333,30 +336,55 @@ func (c *proxyConn) Write(b []byte) (int, error) {
 	}
 	return n, nil
 }
+func (c *proxyConn) Close() error {
+	if c.r != nil {
+		c.r.Close()
+	}
+	if c.w != nil {
+		c.w.Close()
+	}
+	return c.Conn.Close()
+}
 
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (c nopWriteCloser) Close() error { return nil }
+
+func makeReadCloser(r io.Reader) io.ReadCloser {
+	rc, ok := r.(io.ReadCloser)
+	if ok {
+		return rc
+	}
+	return io.NopCloser(r)
+}
+func makeWriteCloser(w io.Writer) io.WriteCloser {
+	wc, ok := w.(io.WriteCloser)
+	if ok {
+		return wc
+	}
+	return nopWriteCloser{w}
+}
 func newCompressConn(conn net.Conn, algorithm string) (net.Conn, error) {
 	switch algorithm {
 	case "disable":
 		return conn, nil
-	case "s2":
-		return &proxyConn{
-			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return s2.NewReader(r), nil },
-			wf:   func(w io.Writer) io.Writer { return s2.NewWriter(w) },
-		}, nil
-	case "flate":
-		return &proxyConn{
-			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return flate.NewReader(r), nil },
-			wf:   func(w io.Writer) io.Writer { w, _ = flate.NewWriter(w, flate.DefaultCompression); return w },
-		}, nil
 	default:
 		fallthrough
-	case "zstd":
+	case "snappy":
 		return &proxyConn{
 			Conn: conn,
-			rf:   func(r io.Reader) (io.Reader, error) { return zstd.NewReader(r) },
-			wf:   func(w io.Writer) io.Writer { w, _ = zstd.NewWriter(w); return w },
+			rf: func(r io.Reader) (io.ReadCloser, error) {
+				return makeReadCloser(snappy.NewReader(r)), nil
+			},
+			wf: func(w io.Writer) (io.WriteCloser, error) { return snappy.NewBufferedWriter(w), nil },
+		}, nil
+	case "zlib":
+		return &proxyConn{
+			Conn: conn,
+			rf:   func(r io.Reader) (io.ReadCloser, error) { return zlib.NewReader(r) },
+			wf:   func(w io.Writer) (io.WriteCloser, error) { return zlib.NewWriter(w), nil },
 		}, nil
 	}
 }
