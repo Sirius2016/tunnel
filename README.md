@@ -16,8 +16,8 @@ config file sample is [here](/conf/tunnel.yaml).
     * https
     
 * protocols supported: kcp+aes(UDP), tcp+tls(TCP).
-* compression: disable, zstd, flate, s2
-    see [https://github.com/klauspost/compress](https://github.com/klauspost/compress) for more details
+
+* compression: disable, snappy, zlib
 
 # License
 MIT.

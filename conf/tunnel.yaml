@@ -7,7 +7,7 @@ server:
 client:
   listen: :1099
   server:
-    compress: zstd # disable, zstd, flate, s2
+    compress: snappy # disable, snappy, zlib
     transfer: kcp # kcp, tcp
     listen: localhost:1099
     key: 'test key'
