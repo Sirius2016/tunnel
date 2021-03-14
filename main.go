@@ -6,22 +6,22 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/cosiner/flag"
 	"github.com/cosiner/golog"
 	"github.com/cosiner/process"
 	"github.com/ghodss/yaml"
+	"github.com/zhuah/sflag"
 )
 
 type Flags struct {
 	Server bool   `usage:"run as server"`
 	Client bool   `usage:"run as client"`
-	Debug  bool   `names:"-d,-debug" usage:"run in debug mode"`
+	Debug  bool   `name:"-d,-debug" usage:"run in debug mode"`
 	Conf   string `usage:"config file" default:"conf/tunnel.yaml"`
 }
 
 func main() {
 	var flags Flags
-	_ = flag.ParseStruct(&flags)
+	sflag.MustParse(os.Args, nil, &flags)
 
 	if flags.Server == flags.Client {
 		stdFatalf("invalid running mode: Server: %t, Client: %t\n", flags.Server, flags.Client)
