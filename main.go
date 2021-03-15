@@ -21,7 +21,7 @@ type Flags struct {
 
 func main() {
 	var flags Flags
-	sflag.MustParse(os.Args, nil, &flags)
+	sflag.MustParse(os.Args, &flags)
 
 	if flags.Server == flags.Client {
 		stdFatalf("invalid running mode: Server: %t, Client: %t\n", flags.Server, flags.Client)
