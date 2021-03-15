@@ -18,7 +18,7 @@ require (
 	github.com/xtaci/kcp-go/v5 v5.6.1
 	github.com/xtaci/lossyconn v0.0.0-20200209145036-adba10fffc37 // indirect
 	github.com/xtaci/smux v1.5.15
-	github.com/zhuah/sflag v0.0.0-20210315082133-0a5dba05b582
+	github.com/zhuah/sflag v0.0.0-20210315085308-0972b3509f2a
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
 	golang.org/x/net v0.0.0-20210226172049-e18ecbb05110 // indirect
 	golang.org/x/sys v0.0.0-20210313202042-bd2e13477e9c // indirect
