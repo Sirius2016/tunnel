@@ -1,23 +1,37 @@
-Tunnel is a simple proxy tool.
+## Tunnel是一个简单的代理工具
 
-# Binary/config file 
-both server/client are compiled in one binary file and share same config file.
+###  编译生成二进制文件
+```bash
+git clone https://github.com/Sirius2016/tunnel.git
+cd tunnel
+go build ./
+```
 
-config file sample is [here](/conf/tunnel.yaml).
+默认配置文件 (src/conf/tunnel.yaml).
 
-* proxy rule:
+* 代理规则，需要GeoLite2-Country.mmdb数据库:
     - geoip: based on country
     - whitelist/blacklist: based on regular expression matching
-     
-* protocols supported(on same local port)
+    
+* 支持的协议(监听本地端口)
     * socks4
     * socks5
     * http
     * https
     
-* protocols supported: kcp+aes(UDP), tcp+tls(TCP).
+* 通讯协议支持: kcp+aes(UDP), tcp+tls(TCP).
 
-* compression: disable, snappy, zlib
+* 传输压缩支持: disable, snappy, zlib
 
-# License
-MIT.
+### 服务器端使用
+
+```bash
+./tunnel -server -conf tunnel-server.yaml
+```
+
+### 客户端使用
+
+```bash
+./tunnel -client -conf tunnel-client.yaml
+```
+

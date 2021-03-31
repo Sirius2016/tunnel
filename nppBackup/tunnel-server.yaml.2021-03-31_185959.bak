@@ -1,0 +1,5 @@
+server:
+  compress: snappy
+  transfer: tcp
+  listen: :8888
+  key: 'autoDownload9828222'

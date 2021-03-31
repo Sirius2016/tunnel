@@ -1,0 +1,5 @@
+server:
+  compress: snappy # disable, snappy, zlib
+  transfer: tcp # kcp, tcp
+  listen: :8888
+  key: 'autoDownload9828222'
