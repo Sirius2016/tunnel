@@ -37,3 +37,29 @@ go build ./
 ./tunnel -client -conf tunnel-client.yaml
 ```
 
+
+
+### Tunnel服务管理：
+
+vim `/usr/lib/systemd/system/tunnel.service`
+
+通过systemd管理tunnel服务：
+
+```
+[Unit]
+Description=tunnel_server
+After=network.target
+
+[Service]
+Type=simple
+NotifyAccess=all
+User=root
+Group=root
+KillMode=control-group
+Restart=always
+ExecStart=/usr/bin/tunnel -server -conf /opt/tunnel/tunnel-server.yaml
+
+[Install]
+WantedBy=multi-user.target
+```
+

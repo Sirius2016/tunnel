@@ -1,0 +1,16 @@
+[Unit]
+Description=tunnel_server
+After=network.target
+
+[Service]
+Type=simple
+NotifyAccess=all
+User=root
+Group=root
+KillMode=control-group
+Restart=always
+ExecStart=/usr/bin/tunnel -server -conf /opt/tunnel/tunnel-server.yaml
+
+[Install]
+WantedBy=multi-user.target
+
